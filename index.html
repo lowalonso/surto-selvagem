@@ -279,7 +279,7 @@ const VER="v1";
 const KEY="surto_selvagem_fichas_"+VER;
 
 /* ============ SINCRONIZAÇÃO COM O BANCO ============ */
-const DB={on:false,ref:null,status:"local",ultimo:{},timers:{},pendente:false};
+const DB={on:false,ref:null,status:"local",ultimo:{},timers:{},subindo:{},pendente:false};
 function dbStatus(s){ DB.status=s; const e=document.getElementById("dbst"); if(e){ e.textContent=({local:"◌ salvo só neste navegador",conectando:"… conectando ao banco",online:"☁ sincronizado com o banco",offline:"⚠ banco fora do ar — salvando local"})[s]||s; e.className="dbst "+s; } }
 function dbInit(){
   if(!DB_CONFIG.databaseURL || !window.firebase){ dbStatus("local"); return; }
@@ -292,7 +292,11 @@ function dbInit(){
       const remoto=snap.val();
       if(remoto && Object.keys(remoto).length){
         PJ=Object.values(remoto).map(normaliza);
-        DB.ref.child("ordem").once("value").then(o=>{ const ord=o.val()||[]; PJ.sort((a,b)=>{ const ia=ord.indexOf(a.id), ib=ord.indexOf(b.id); return (ia<0?999:ia)-(ib<0?999:ib); }); PJ.forEach(p=>DB.ultimo[p.id]=JSON.stringify(limpo(p))); PJ.forEach(saveOneLocal); saveIndexLocal(); if(cur>=PJ.length)cur=0; render(); });
+        DB.ref.child("ordem").once("value").then(o=>{ const ord=o.val()||[]; PJ.sort((a,b)=>{ const ia=ord.indexOf(a.id), ib=ord.indexOf(b.id); return (ia<0?999:ia)-(ib<0?999:ib); });
+          // fichas oficiais que ainda não existem no banco: adiciona e sobe (em vez de deixar sumir)
+          BASE.forEach(b=>{ if(!PJ.some(p=>p.id===b.id)){ const nova=normaliza(JSON.parse(JSON.stringify(b))); PJ.push(nova); DB.subindo[b.id]=1; DB.ref.child("fichas/"+b.id).set(limpo(nova)).then(()=>{delete DB.subindo[b.id];}).catch(()=>{dbStatus("offline");}); } });
+          DB.ref.child("ordem").set(PJ.map(p=>p.id)).catch(()=>{});
+          PJ.forEach(p=>DB.ultimo[p.id]=JSON.stringify(limpo(p))); PJ.forEach(saveOneLocal); saveIndexLocal(); if(cur>=PJ.length)cur=0; render(); });
       } else {
         PJ.forEach(p=>DB.ref.child("fichas/"+p.id).set(limpo(p)));
         DB.ref.child("ordem").set(PJ.map(p=>p.id));
@@ -302,7 +306,7 @@ function dbInit(){
       DB.ref.child("fichas").on("value",s=>{
         const r=s.val()||{}; let mudou=false;
         Object.keys(r).forEach(id=>{ const j=JSON.stringify(normaliza(r[id])); if(DB.ultimo[id]!==j){ DB.ultimo[id]=j; const i=PJ.findIndex(p=>p.id===id); const nova=normaliza(JSON.parse(j)); if(i>=0){ Object.keys(PJ[i]).forEach(k=>{ if(k[0]==="_") nova[k]=PJ[i][k]; }); PJ[i]=nova; } else PJ.push(nova); saveOneLocal(nova); mudou=true; } });
-        PJ.forEach((p,i)=>{ if(!r[p.id] && DB.ultimo[p.id]!==undefined){ PJ.splice(i,1); lsDel(KEY_FICHA(p.id)); delete DB.ultimo[p.id]; mudou=true; } });
+        for(let i=PJ.length-1;i>=0;i--){ const p=PJ[i]; if(!r[p.id] && DB.ultimo[p.id]!==undefined && !DB.subindo[p.id] && !DB.timers[p.id] && !BASE.some(b=>b.id===p.id)){ PJ.splice(i,1); lsDel(KEY_FICHA(p.id)); delete DB.ultimo[p.id]; mudou=true; } }
         if(mudou){ if(cur>=PJ.length)cur=Math.max(0,PJ.length-1); saveIndexLocal(); const a=document.activeElement; if(a&&(a.tagName==="INPUT"||a.tagName==="TEXTAREA"||a.isContentEditable)){ DB.pendente=true; } else render(); }
       });
       DB.ref.child("ordem").on("value",o=>{ const ord=o.val(); if(!Array.isArray(ord))return; PJ.sort((a,b)=>{ const ia=ord.indexOf(a.id), ib=ord.indexOf(b.id); return (ia<0?999:ia)-(ib<0?999:ib); }); });
@@ -315,7 +319,7 @@ function dbSave(p){
   if(!DB.on) return;
   const j=JSON.stringify(limpo(p)); DB.ultimo[p.id]=j;
   clearTimeout(DB.timers[p.id]);
-  DB.timers[p.id]=setTimeout(()=>{ DB.ref.child("fichas/"+p.id).set(JSON.parse(j)).catch(()=>dbStatus("offline")); },250);
+  DB.timers[p.id]=setTimeout(()=>{ delete DB.timers[p.id]; DB.ref.child("fichas/"+p.id).set(JSON.parse(j)).catch(()=>dbStatus("offline")); },250);
 }
 function dbIndex(){ if(DB.on) DB.ref.child("ordem").set(PJ.map(p=>p.id)); }
 function dbRemove(id){ if(DB.on){ delete DB.ultimo[id]; DB.ref.child("fichas/"+id).remove(); dbIndex(); } }
