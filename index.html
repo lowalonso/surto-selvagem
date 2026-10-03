@@ -405,6 +405,46 @@ function rolar(p){
 }
 
 
+/* ============ SUBIR DE NÍVEL ============ */
+let LVL={on:false,av:[],attrs:[],exps:[],novaExp:"",carta:"",cartaX:""};
+const AVANCOS=[["attr","+1 em dois atributos (ficam marcados)"],["pv","+1 Ponto de Vida máximo"],["fad","+1 Ponto de Fadiga máximo"],["expb","+1 em duas Experiências"],["ev","+1 na Evasão"],["carta","Carta de domínio adicional"]];
+function aplicarNivel(p){
+  const nv=p.nivel+1, tierUp=[2,5,8].includes(nv);
+  if(LVL.av.length!==2){toast("Escolha 2 avanços");return;}
+  if(LVL.av.includes("attr")&&LVL.attrs.length!==2){toast("Escolha os dois atributos");return;}
+  if(LVL.av.includes("expb")&&LVL.exps.length!==2){toast("Escolha as duas Experiências");return;}
+  if(tierUp&&!LVL.novaExp.trim()){toast("Dê um nome à nova Experiência do patamar");return;}
+  if(!LVL.carta){toast("Escolha a carta de domínio do nível");return;}
+  if(LVL.av.includes("carta")&&!LVL.cartaX){toast("Escolha a carta adicional do avanço");return;}
+  const feitos=[];
+  p.nivel=nv;
+  // limiares: recalcula pelo equipamento quando possível; senão, só +1
+  const a=findEq(EQP.arm,p.armadura);
+  if(a&&a.corporal){ const T=[[9,19],[11,24],[13,31],[15,38]][patamar(nv)-1]; p.limMenor=T[0]; p.limGrave=T[1]; if(p.id==="azura"){p.limMenor++;p.limGrave++;} }
+  else if(a&&a.limMenor){ p.limMenor=a.limMenor+nv; p.limGrave=a.limGrave+nv; if(p.id==="azura"){p.limMenor++;p.limGrave++;} }
+  else { p.limMenor++; p.limGrave++; }
+  feitos.push("limiares "+p.limMenor+"/"+p.limGrave);
+  if(tierUp){
+    p.prof++; feitos.push("Proficiência "+p.prof);
+    p.experiencias.push({nome:LVL.novaExp.trim(),bonus:2}); feitos.push("nova Experiência: "+LVL.novaExp.trim()+" +2");
+  }
+  LVL.av.forEach(id=>{
+    if(id==="attr"){ LVL.attrs.forEach(x=>{p.atributos[x]=(p.atributos[x]||0)+1;}); feitos.push("+1 em "+LVL.attrs.join(" e ")+" (marcados até o próximo patamar)"); }
+    if(id==="pv"){ p.pvMax++; feitos.push("PV máx "+p.pvMax); }
+    if(id==="fad"){ p.fadigaMax++; feitos.push("Fadiga máx "+p.fadigaMax); }
+    if(id==="ev"){ p.evasao++; feitos.push("Evasão "+p.evasao); }
+    if(id==="expb"){ LVL.exps.forEach(nm=>{const e=p.experiencias.find(x=>x.nome===nm); if(e)e.bonus++;}); feitos.push("+1 em "+LVL.exps.join(" e ")); }
+  });
+  [LVL.carta, LVL.av.includes("carta")?LVL.cartaX:null].filter(Boolean).forEach(k=>{
+    const i=k.indexOf("::"), d=k.slice(0,i), n=k.slice(i+2);
+    const cd=(CARDS[d]||[]).find(x=>x.n===n);
+    if(cd){ p.cartas.push({dom:d,tipo:cd.tipo,rec:cd.rec,lvl:cd.lvl,n:cd.n,t:cd.t,mao:true}); feitos.push("carta: "+cd.n+" ("+d+")"); }
+  });
+  p.notas.unshift({titulo:"Subida para o nível "+nv,texto:feitos.join(" · "),data:new Date().toISOString().slice(0,10)});
+  LVL={on:false,av:[],attrs:[],exps:[],novaExp:"",carta:"",cartaX:""};
+  saveOne(p); render(); toast(p.nome+" agora é nível "+nv+"!");
+}
+
 /* ===== LEITOR DE FICHA EM PDF (formato "Surto Selvagem · ficha de mesa") ===== */
 function pdfItemsToLines(pages){
   // pages: [{w, items:[{s,x,y}]}]  -> returns {lines:[string], header:[items]}
@@ -600,7 +640,7 @@ function render(){
   PJ.forEach((p,i)=>{
     const t=el("div","tab"+(i===cur?" sel":""),"<b>"+esc(p.nome)+"</b><span>"+esc(p.classe)+" · nv "+p.nivel+"</span>");
     const hp=el("div","hp"); hp.style.width=(100*Math.min(1,p.pv/(p.pvMax||1)))+"%"; t.appendChild(hp);
-    t.onclick=()=>{cur=i;lsSet(KEY+"_cur",String(i));REST={tipo:null,mv:[],log:""};DICE.last=null;render();window.scrollTo({top:0});};
+    t.onclick=()=>{cur=i;lsSet(KEY+"_cur",String(i));REST={tipo:null,mv:[],log:""};DICE.last=null;LVL={on:false,av:[],attrs:[],exps:[],novaExp:"",carta:"",cartaX:""};render();window.scrollTo({top:0});};
     tabs.appendChild(t);
   });
   const p=PJ[cur];
@@ -742,6 +782,77 @@ function render(){
     row.appendChild(m);row.appendChild(v);row.appendChild(pl); b.appendChild(row); ag.appendChild(b);
   });
   c.appendChild(ag); R.appendChild(c);
+
+  // ---------- SUBIR DE NÍVEL ----------
+  c=el("div","card");
+  c.appendChild(el("h2",null,"Subir de Nível <small>"+(p.nivel>=10?"nível máximo":"nível "+p.nivel+" → "+(p.nivel+1))+"</small>"));
+  if(p.nivel>=10){
+    c.appendChild(el("div","hint","Nível 10 alcançado — o Surto que se cuide."));
+  } else if(!LVL.on){
+    const b=el("button","add","⬆ subir para o nível "+(p.nivel+1));
+    b.onclick=()=>{LVL={on:true,av:[],attrs:[],exps:[],novaExp:"",carta:"",cartaX:""};render();};
+    c.appendChild(b);
+  } else {
+    const nv=p.nivel+1, tierUp=[2,5,8].includes(nv);
+    const auto=["limiares de dano recalculados (base da armadura + nível)"];
+    if(tierUp){auto.push("Proficiência +1");auto.push("nova Experiência (+2)");}
+    c.appendChild(el("div","hint","<b>Automático no nível "+nv+":</b> "+auto.join(" · ")+". Depois escolha <b>2 avanços</b> e <b>1 carta de domínio</b> nova."));
+    if(tierUp){
+      c.appendChild(el("label","fl","Nova Experiência do patamar (+2)"));
+      const ne=el("input","tx"); ne.placeholder="Ex.: Encarei o deus corrompido"; ne.value=LVL.novaExp; ne.oninput=()=>LVL.novaExp=ne.value; c.appendChild(ne);
+    }
+    c.appendChild(el("label","fl","Avanços — escolha 2 · "+LVL.av.length+"/2"));
+    AVANCOS.forEach(([id,nome])=>{
+      const sel=LVL.av.includes(id);
+      const m=el("div","mv"+(sel?" on":"")); m.appendChild(el("div","nm","<b>"+nome+"</b>"));
+      m.appendChild(el("div","cnt",sel?"✓":""));
+      m.onclick=()=>{ if(sel)LVL.av=LVL.av.filter(x=>x!==id); else if(LVL.av.length<2)LVL.av.push(id); else toast("Já escolheu 2 avanços"); render(); };
+      c.appendChild(m);
+    });
+    if(LVL.av.includes("attr")){
+      c.appendChild(el("label","fl","Quais dois atributos ganham +1? · "+LVL.attrs.length+"/2"));
+      const r2=el("div","acts");
+      ATRS.forEach(a2=>{
+        const b=el("button",LVL.attrs.includes(a2)?"":"g",a2+" "+sg(p.atributos[a2]||0)); b.style.minWidth="30%";
+        b.onclick=()=>{ if(LVL.attrs.includes(a2))LVL.attrs=LVL.attrs.filter(x=>x!==a2); else if(LVL.attrs.length<2)LVL.attrs.push(a2); render(); };
+        r2.appendChild(b);
+      });
+      c.appendChild(r2);
+    }
+    if(LVL.av.includes("expb")){
+      c.appendChild(el("label","fl","Quais duas Experiências ganham +1? · "+LVL.exps.length+"/2"));
+      const r3=el("div","acts");
+      p.experiencias.forEach(e2=>{
+        const b=el("button",LVL.exps.includes(e2.nome)?"":"g",e2.nome+" +"+e2.bonus); b.style.minWidth="45%";
+        b.onclick=()=>{ if(LVL.exps.includes(e2.nome))LVL.exps=LVL.exps.filter(x=>x!==e2.nome); else if(LVL.exps.length<2)LVL.exps.push(e2.nome); render(); };
+        r3.appendChild(b);
+      });
+      c.appendChild(r3);
+    }
+    const cCard=c;
+    function cartaSel(lbl,cur2,set,excl){
+      cCard.appendChild(el("label","fl",lbl));
+      const s=el("select"); const o0=el("option",null,"— escolher —"); o0.value=""; s.appendChild(o0);
+      p.dominios.forEach(d=>(CARDS[d]||[]).forEach(cd=>{
+        if((cd.lvl||1)>nv)return;
+        const k=d+"::"+cd.n;
+        if(p.cartas.some(x=>(x.n||"").toLowerCase()===cd.n.toLowerCase()))return;
+        if(excl.includes(k))return;
+        const o=el("option",null,"[Nv "+cd.lvl+"] "+d+" · "+cd.n); o.value=k; if(cur2===k)o.selected=true; s.appendChild(o);
+      }));
+      s.onchange=()=>{set(s.value);render();};
+      cCard.appendChild(s);
+      if(cur2){ const i2=cur2.indexOf("::"), d2=cur2.slice(0,i2), n2=cur2.slice(i2+2); const cd2=(CARDS[d2]||[]).find(x=>x.n===n2); if(cd2) cCard.appendChild(el("div","eqinfo","<b>"+esc(cd2.n)+"</b> — "+esc(cd2.t))); }
+    }
+    cartaSel("Carta de domínio do nível (nível ≤ "+nv+")",LVL.carta,v=>LVL.carta=v,[LVL.cartaX].filter(Boolean));
+    if(LVL.av.includes("carta")) cartaSel("Carta ADICIONAL do avanço (nível ≤ "+nv+")",LVL.cartaX,v=>LVL.cartaX=v,[LVL.carta].filter(Boolean));
+    const bts=el("div","acts");
+    const ap=el("button",null,"✓ Aplicar subida"); ap.onclick=()=>aplicarNivel(p);
+    const cn=el("button","g","cancelar"); cn.onclick=()=>{LVL={on:false,av:[],attrs:[],exps:[],novaExp:"",carta:"",cartaX:""};render();};
+    bts.appendChild(ap); bts.appendChild(cn); c.appendChild(bts);
+    c.appendChild(el("div","hint","Tudo é aplicado na ficha e registrado no diário. Confira depois habilidades que escalam sozinhas: <b>Ataque Furtivo</b> (patamar), <b>Dado de Inspiração</b> e <b>Dado de Determinação</b> (d8/d6 no nível 5)."));
+  }
+  R.appendChild(c);
 
   // ---------- EQUIPAMENTO ----------
   c=el("div","card"); c.appendChild(el("h2",null,"Armas & Armadura <small>patamares 1–4</small>"));
